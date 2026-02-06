@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +15,7 @@ import (
 	"github.com/fulldump/goconfig"
 
 	"github.com/holacloud/watcher/config"
+	"github.com/holacloud/watcher/telegram"
 )
 
 type State struct {
@@ -51,6 +49,7 @@ func main() {
 	now := time.Now()
 
 	st, _ := loadState(c.State)
+	tg := telegram.New(c.Telegram)
 
 	uptimeMS, activeState, err := getUptimeMS(c.Unit, c.Timeout)
 	if err != nil {
@@ -62,7 +61,7 @@ func main() {
 	if activeState != "active" {
 		msg := fmt.Sprintf("⚠️ Service %s state=%s (uptime=%s)", c.Unit, activeState, formatDurMS(uptimeMS))
 		if shouldAlert(st, now, c.Cooldown) {
-			alert(c.DryRun, msg)
+			alert(c.DryRun, tg, msg)
 			st.LastAlertMS = now.UnixMilli()
 		}
 		st.LastUptimeMS = uptimeMS
@@ -76,7 +75,7 @@ func main() {
 			c.Unit, formatDurMS(st.LastUptimeMS), formatDurMS(uptimeMS), activeState)
 
 		if shouldAlert(st, now, c.Cooldown) {
-			alert(c.DryRun, msg)
+			alert(c.DryRun, tg, msg)
 			st.LastAlertMS = now.UnixMilli()
 		} else {
 			fmt.Println("restart detected but in cooldown; skipping alert")
@@ -89,12 +88,12 @@ func main() {
 	}
 }
 
-func alert(dry bool, msg string) {
+func alert(dry bool, tg *telegram.Telegram, msg string) {
 	if dry {
 		fmt.Println("[DRY-RUN]", msg)
 		return
 	}
-	if err := sendTelegram(msg); err != nil {
+	if err := sendTelegram(tg, msg); err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: sendTelegram: %v\n", err)
 	}
 }
@@ -222,38 +221,6 @@ func saveState(path string, st State) error {
 	return os.Rename(tmp, path)
 }
 
-func sendTelegram(text string) error {
-	token := os.Getenv("BOT_TOKEN")
-	chatID := os.Getenv("CHAT_ID")
-	if token == "" || chatID == "" {
-		return fmt.Errorf("missing BOT_TOKEN or CHAT_ID env vars")
-	}
-
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
-
-	payload := map[string]any{
-		"chat_id":                  chatID,
-		"text":                     text,
-		"disable_web_page_preview": true,
-	}
-	body, _ := json.Marshal(payload)
-
-	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	cli := &http.Client{Timeout: 2 * time.Second}
-	resp, err := cli.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode/100 != 2 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("telegram status=%s body=%s", resp.Status, strings.TrimSpace(string(b)))
-	}
-	return nil
+func sendTelegram(tg *telegram.Telegram, text string) error {
+	return tg.SendMessageSync(text)
 }

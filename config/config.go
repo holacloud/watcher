@@ -1,6 +1,10 @@
 package config
 
-import "time"
+import (
+	"time"
+
+	"github.com/holacloud/watcher/telegram"
+)
 
 var VERSION = "dev"
 
@@ -10,9 +14,8 @@ type Config struct {
 	Timeout  time.Duration `usage:"timeout for systemctl command"`
 	Cooldown time.Duration `usage:"minimum time between alerts"`
 	DryRun   bool          `usage:"do not send telegram, only print"`
-	BotToken string        `usage:"telegram bot token"`
-	BotID    string        `usage:"telegram bot id"`
-	
+	Telegram telegram.Config
+
 	ShowConfig bool `json:"show_config"`
 	Version    bool `json:"version"`
 }
